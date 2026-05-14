@@ -28,24 +28,30 @@ export async function waitForMeetingNotesBlock(
 }
 
 async function findMeetingNotesBlock(
-	notion: Client,
+	_notion: Client,
 	pageId: string,
 ): Promise<MeetingNotesBlock | null> {
+	const token = process.env.NOTION_API_TOKEN;
+	if (!token) throw new Error("NOTION_API_TOKEN is not configured");
+
 	let cursor: string | undefined;
 	do {
 		const query = new URLSearchParams({ page_size: "100" });
 		if (cursor) query.set("start_cursor", cursor);
-		const resp = (await notion.request({
-			method: "get",
-			path: `blocks/${pageId}/children?${query.toString()}`,
-			headers: { "Notion-Version": "2026-03-11" },
-		} as any)) as any;
+		const url = `https://api.notion.com/v1/blocks/${pageId}/children?${query.toString()}`;
+		const res = await fetch(url, {
+			method: "GET",
+			headers: {
+				Authorization: `Bearer ${token}`,
+				"Notion-Version": "2026-03-11",
+			},
+		});
+		if (!res.ok) {
+			throw new Error(`Notion blocks.children.list failed: ${res.status} ${await res.text()}`);
+		}
+		const resp = (await res.json()) as any;
 		for (const block of resp.results ?? []) {
 			if (block.type === "meeting_notes") {
-				console.log(
-					`Found meeting_notes block ${block.id}:`,
-					JSON.stringify(block.meeting_notes ?? {}),
-				);
 				const calendarEvent = block.meeting_notes?.calendar_event;
 				if (calendarEvent?.start_time) {
 					return {
