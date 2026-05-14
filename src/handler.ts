@@ -6,6 +6,7 @@ import {
 	buildInternalUserMap,
 	resolveInternalAttendees,
 } from "./internalAttendees";
+import { upsertMeetingNoteIdRow } from "./meetingNoteIdsTable";
 import { waitForMeetingNotesBlock } from "./meetingNotesBlock";
 
 type Zapier = ReturnType<typeof createZapierSdk>;
@@ -121,4 +122,20 @@ export async function handlePageCreated(
 	console.log(
 		`Updated ${pageId}: event=${event.id}, contacts=${contactPageIds.length}, internal=${internalAttendeeIds.length}`,
 	);
+
+	if (event.iCalUID) {
+		try {
+			await upsertMeetingNoteIdRow(zapier, {
+				iCalUID: event.iCalUID,
+				pageId,
+				startDateTime: event.start.dateTime ?? event.start.date,
+				endDateTime: event.end.dateTime ?? event.end.date,
+				summary: event.summary,
+			});
+		} catch (err) {
+			console.log(
+				`Meeting Note IDs table write failed: ${(err as Error)?.message ?? err}`,
+			);
+		}
+	}
 }
