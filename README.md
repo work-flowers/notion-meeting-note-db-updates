@@ -13,8 +13,7 @@ When a page is added to the Meeting Notes data source, a Notion DB automation ca
    - External addresses → Notion **Contacts** page IDs. Uses a Zapier-table blocklist, classifies unknown addresses with AI by Zapier (individual vs. service account), and creates new Contact pages for individuals (capped at 10 per run).
    - Internal addresses → Notion workspace user IDs, via `notion.users.list`.
 5. Patches the page with `Date`, `Google Calendar Event ID`, `Description`, `Call Link`, `Contacts`, `Internal Attendees`.
-
-The original Zap's "Meeting Note IDs" logging table is intentionally out of scope.
+6. Find-or-creates a row in the Zapier `[Table] Meeting Note IDs` (`01JZCVG73MBWWB0357CEPS4903`) keyed on `iCalUID`, recording the Notion page ID alongside the event's start, end, and summary.
 
 ## Layout
 
@@ -26,7 +25,8 @@ src/
 ├── calendar.ts          # Zapier-SDK-backed Google Calendar lookup
 ├── contacts.ts          # Email → Notion Contact page-id resolution (ported sub-Zap)
 ├── internalAttendees.ts # notion.users.list → email→user-id map
-└── notionRaw.ts         # Raw client.request shim for data-source endpoints (2026-03-11)
+├── meetingNoteIdsTable.ts # Find-or-create Zapier Table row mapping pageId ↔ iCalUID
+└── notionRaw.ts         # Raw fetch helpers for data-source endpoints (Notion-Version 2026-03-11)
 ```
 
 ## Setup
