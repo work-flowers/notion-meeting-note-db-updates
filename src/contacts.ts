@@ -178,11 +178,16 @@ async function createNotionContact(
 	notion: Client,
 	email: string,
 ): Promise<string | null> {
-	const page = (await notion.pages.create({
-		parent: { data_source_id: NOTION_CONTACTS_DATA_SOURCE_ID } as any,
-		properties: {
-			"Primary Email": { email },
+	const page = (await notion.request({
+		method: "post",
+		path: "pages",
+		body: {
+			parent: { data_source_id: NOTION_CONTACTS_DATA_SOURCE_ID },
+			properties: {
+				"Primary Email": { email },
+			},
 		},
+		headers: { "Notion-Version": "2026-03-11" },
 	} as any)) as any;
 	return page?.id ?? null;
 }

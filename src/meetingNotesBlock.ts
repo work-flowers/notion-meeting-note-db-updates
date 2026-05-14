@@ -33,11 +33,13 @@ async function findMeetingNotesBlock(
 ): Promise<MeetingNotesBlock | null> {
 	let cursor: string | undefined;
 	do {
-		const resp = (await notion.blocks.children.list({
-			block_id: pageId,
-			start_cursor: cursor,
-			page_size: 100,
-		})) as any;
+		const query = new URLSearchParams({ page_size: "100" });
+		if (cursor) query.set("start_cursor", cursor);
+		const resp = (await notion.request({
+			method: "get",
+			path: `blocks/${pageId}/children?${query.toString()}`,
+			headers: { "Notion-Version": "2026-03-11" },
+		} as any)) as any;
 		for (const block of resp.results ?? []) {
 			if (block.type === "meeting_notes") {
 				const calendarEvent = block.meeting_notes?.calendar_event;
