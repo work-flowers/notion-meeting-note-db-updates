@@ -42,6 +42,10 @@ async function findMeetingNotesBlock(
 		} as any)) as any;
 		for (const block of resp.results ?? []) {
 			if (block.type === "meeting_notes") {
+				console.log(
+					`Found meeting_notes block ${block.id}:`,
+					JSON.stringify(block.meeting_notes ?? {}),
+				);
 				const calendarEvent = block.meeting_notes?.calendar_event;
 				if (calendarEvent?.start_time) {
 					return {
