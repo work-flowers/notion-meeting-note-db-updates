@@ -1,6 +1,6 @@
 import type { Client } from "@notionhq/client";
 import type { createZapierSdk } from "@zapier/zapier-sdk";
-import { queryDataSource } from "./notionRaw";
+import { createPage, queryDataSource } from "./notionRaw";
 
 type Zapier = ReturnType<typeof createZapierSdk>;
 
@@ -175,20 +175,15 @@ async function classifyEmails(
 }
 
 async function createNotionContact(
-	notion: Client,
+	_notion: Client,
 	email: string,
 ): Promise<string | null> {
-	const page = (await notion.request({
-		method: "post",
-		path: "pages",
-		body: {
-			parent: { data_source_id: NOTION_CONTACTS_DATA_SOURCE_ID },
-			properties: {
-				"Primary Email": { email },
-			},
+	const page = await createPage({
+		parent: { data_source_id: NOTION_CONTACTS_DATA_SOURCE_ID },
+		properties: {
+			"Primary Email": { email },
 		},
-		headers: { "Notion-Version": "2026-03-11" },
-	} as any)) as any;
+	});
 	return page?.id ?? null;
 }
 
