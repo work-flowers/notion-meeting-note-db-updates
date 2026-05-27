@@ -123,6 +123,30 @@ export async function handlePageCreated(
 		`Updated ${pageId}: event=${event.id}, contacts=${contactPageIds.length}, internal=${internalAttendeeIds.length}`,
 	);
 
+	// Notion DB automations don't reliably fire on API-driven property updates,
+	// and the native "set Companies from Contacts" automation can't cascade-trigger
+	// other automations. Explicitly POST to the icon-sync worker so it can copy
+	// the related Company's icon onto this Meeting Note.
+	const iconSyncUrl = process.env.ICON_SYNC_WEBHOOK_URL;
+	if (iconSyncUrl) {
+		try {
+			const res = await fetch(iconSyncUrl, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ page_id: pageId }),
+			});
+			if (!res.ok) {
+				console.log(
+					`Icon sync webhook returned ${res.status} for ${pageId}`,
+				);
+			}
+		} catch (err) {
+			console.log(
+				`Icon sync webhook failed for ${pageId}: ${(err as Error)?.message ?? err}`,
+			);
+		}
+	}
+
 	if (event.iCalUID) {
 		try {
 			await upsertMeetingNoteIdRow(zapier, {
