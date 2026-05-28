@@ -31,6 +31,23 @@ function extractPageId(body: unknown): string | null {
 	);
 }
 
+function stripHtml(html: string): string {
+	return html
+		.replace(/<\s*br\s*\/?\s*>/gi, "\n")
+		.replace(/<\/\s*(p|div|li|h[1-6])\s*>/gi, "\n")
+		.replace(/<[^>]+>/g, "")
+		.replace(/&nbsp;/gi, " ")
+		.replace(/&amp;/gi, "&")
+		.replace(/&lt;/gi, "<")
+		.replace(/&gt;/gi, ">")
+		.replace(/&quot;/gi, '"')
+		.replace(/&#39;/gi, "'")
+		.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+		.replace(/[ \t]+\n/g, "\n")
+		.replace(/\n{3,}/g, "\n\n")
+		.trim();
+}
+
 async function getPageTitle(notion: Client, pageId: string): Promise<string> {
 	const page = (await notion.pages.retrieve({ page_id: pageId })) as any;
 	const props = page.properties ?? {};
@@ -100,9 +117,12 @@ export async function handlePageCreated(
 		};
 	}
 	if (event.description) {
-		properties["Description"] = {
-			rich_text: [{ type: "text", text: { content: event.description.slice(0, 2000) } }],
-		};
+		const cleaned = stripHtml(event.description);
+		if (cleaned) {
+			properties["Description"] = {
+				rich_text: [{ type: "text", text: { content: cleaned.slice(0, 2000) } }],
+			};
+		}
 	}
 	if (event.hangoutLink) {
 		properties["Call Link"] = { url: event.hangoutLink };
