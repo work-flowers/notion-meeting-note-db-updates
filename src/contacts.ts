@@ -160,9 +160,13 @@ async function classifyEmails(
 	} as any);
 
 	const outer: any[] = Array.isArray(data) ? data : data ? [data] : [];
-	const items = outer.flatMap((entry) =>
-		Array.isArray(entry?.result) ? entry.result : [entry],
-	);
+	const items = outer.flatMap((entry) => {
+		const result = entry?.result;
+		// Zapier's AI action wraps array outputs under `result.items`.
+		if (Array.isArray(result?.items)) return result.items;
+		if (Array.isArray(result)) return result;
+		return [entry];
+	});
 	const individuals = new Set<string>();
 	for (const item of items) {
 		const verdict = item?.["Is Individual"];
