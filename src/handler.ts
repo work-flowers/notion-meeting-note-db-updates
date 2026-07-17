@@ -1,11 +1,12 @@
 import type { Client } from "@notionhq/client";
 import type { createZapierSdk } from "@zapier/zapier-sdk";
-import { extractMeetingTitle, findCalendarEvent } from "./calendar";
-import { resolveContactPageIds, extractAddresses } from "./contacts";
 import {
 	buildInternalUserMap,
-	resolveInternalAttendees,
-} from "./internalAttendees";
+	extractAddresses,
+	resolveContactPageIds,
+	resolveInternalUserIds,
+} from "@work-flowers/notion-worker-shared";
+import { extractMeetingTitle, findCalendarEvent } from "./calendar";
 import { upsertMeetingNoteIdRow } from "./meetingNoteIdsTable";
 import { waitForMeetingNotesBlock } from "./meetingNotesBlock";
 
@@ -101,7 +102,7 @@ export async function handlePageCreated(
 		buildInternalUserMap(notion),
 		resolveContactPageIds(notion, zapier, allEmails),
 	]);
-	const internalAttendeeIds = resolveInternalAttendees(allEmails, internalMap);
+	const internalAttendeeIds = resolveInternalUserIds(allEmails, internalMap);
 
 	const properties: Record<string, any> = {
 		"Google Calendar Event ID": {

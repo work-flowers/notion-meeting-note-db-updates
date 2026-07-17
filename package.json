@@ -18,6 +18,7 @@
 	"dependencies": {
 		"@notionhq/client": "^2.3.0",
 		"@notionhq/workers": ">=0.0.0",
+		"@work-flowers/notion-worker-shared": "github:work-flowers/notion-worker-shared",
 		"@zapier/zapier-sdk": "^0.53.0"
 	}
 }
