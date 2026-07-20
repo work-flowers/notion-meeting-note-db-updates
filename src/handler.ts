@@ -1,13 +1,9 @@
 import type { Client } from "@notionhq/client";
 import type { createZapierSdk } from "@zapier/zapier-sdk";
 import {
-	buildInternalUserMap,
-	extractAddresses,
+	DEFAULT_INTERNAL_DOMAIN,
 	resolveContactPageIds,
-	resolveInternalUserIds,
 } from "@work-flowers/notion-worker-shared";
-import { extractMeetingTitle, findCalendarEvent } from "./calendar";
-import { upsertMeetingNoteIdRow } from "./meetingNoteIdsTable";
 import { waitForMeetingNotesBlock } from "./meetingNotesBlock";
 
 type Zapier = ReturnType<typeof createZapierSdk>;
@@ -32,35 +28,47 @@ function extractPageId(body: unknown): string | null {
 	);
 }
 
-function stripHtml(html: string): string {
-	return html
-		.replace(/<\s*br\s*\/?\s*>/gi, "\n")
-		.replace(/<\/\s*(p|div|li|h[1-6])\s*>/gi, "\n")
-		.replace(/<[^>]+>/g, "")
-		.replace(/&nbsp;/gi, " ")
-		.replace(/&amp;/gi, "&")
-		.replace(/&lt;/gi, "<")
-		.replace(/&gt;/gi, ">")
-		.replace(/&quot;/gi, '"')
-		.replace(/&#39;/gi, "'")
-		.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
-		.replace(/[ \t]+\n/g, "\n")
-		.replace(/\n{3,}/g, "\n\n")
-		.trim();
+interface ResolvedAttendees {
+	internalUserIds: string[];
+	externalEmails: string[];
 }
 
-async function getPageTitle(notion: Client, pageId: string): Promise<string> {
-	const page = (await notion.pages.retrieve({ page_id: pageId })) as any;
-	const props = page.properties ?? {};
-	for (const value of Object.values(props) as any[]) {
-		if (value?.type === "title") {
-			return (value.title ?? [])
-				.map((t: any) => t.plain_text)
-				.join("")
-				.trim();
+/**
+ * Resolve meeting_notes attendee Notion user IDs to workspace people.
+ * Internal-domain people keep their user ID (for the people property);
+ * everyone else contributes an email for Contacts resolution.
+ */
+async function resolveAttendees(
+	notion: Client,
+	attendeeUserIds: string[],
+): Promise<ResolvedAttendees> {
+	const internalUserIds = new Set<string>();
+	const externalEmails = new Set<string>();
+
+	for (const userId of attendeeUserIds) {
+		let user: any;
+		try {
+			user = await notion.users.retrieve({ user_id: userId });
+		} catch (err) {
+			console.log(
+				`Could not resolve attendee ${userId}: ${(err as Error)?.message ?? err}`,
+			);
+			continue;
+		}
+		if (user?.type !== "person") continue;
+		const email = String(user.person?.email ?? "").toLowerCase();
+		if (!email) continue;
+		if (email.endsWith(DEFAULT_INTERNAL_DOMAIN)) {
+			internalUserIds.add(user.id);
+		} else {
+			externalEmails.add(email);
 		}
 	}
-	return "";
+
+	return {
+		internalUserIds: [...internalUserIds],
+		externalEmails: [...externalEmails],
+	};
 }
 
 export async function handlePageCreated(
@@ -81,67 +89,39 @@ export async function handlePageCreated(
 		return;
 	}
 
-	const startTime = meetingNotesBlock.calendar_event.start_time;
-	const title = await getPageTitle(notion, pageId);
-	const query = extractMeetingTitle(title);
-	console.log(`Searching Google Calendar: q="${query}" start=${startTime}`);
+	const { start_time, end_time, attendees = [] } =
+		meetingNotesBlock.calendar_event;
+	console.log(
+		`meeting_notes block found: start=${start_time}, attendees=${attendees.length}`,
+	);
 
-	const event = await findCalendarEvent(zapier, { query, startTime });
-	if (!event) {
-		console.log(`No matching Google Calendar event for ${pageId}`);
-		return;
-	}
-
-	const organizerEmail = event.organizer?.email ?? "";
-	const attendeeEmails = (event.attendees ?? [])
-		.map((a) => a.email)
-		.filter((e): e is string => Boolean(e));
-	const allEmails = extractAddresses([organizerEmail, ...attendeeEmails].join(","));
-
-	const [internalMap, contactPageIds] = await Promise.all([
-		buildInternalUserMap(notion),
-		resolveContactPageIds(notion, zapier, allEmails),
-	]);
-	const internalAttendeeIds = resolveInternalUserIds(allEmails, internalMap);
+	const { internalUserIds, externalEmails } = await resolveAttendees(
+		notion,
+		attendees,
+	);
+	const contactPageIds = await resolveContactPageIds(
+		notion,
+		zapier,
+		externalEmails,
+	);
 
 	const properties: Record<string, any> = {
-		"Google Calendar Event ID": {
-			rich_text: [{ type: "text", text: { content: event.id } }],
-		},
+		Date: { date: { start: start_time, end: end_time ?? null } },
 	};
-
-	const startDateTime = event.start.dateTime ?? event.start.date;
-	const endDateTime = event.end.dateTime ?? event.end.date;
-	if (startDateTime) {
-		properties["Date"] = {
-			date: { start: startDateTime, end: endDateTime ?? null },
-		};
-	}
-	if (event.description) {
-		const cleaned = stripHtml(event.description);
-		if (cleaned) {
-			properties["Description"] = {
-				rich_text: [{ type: "text", text: { content: cleaned.slice(0, 2000) } }],
-			};
-		}
-	}
-	if (event.hangoutLink) {
-		properties["Call Link"] = { url: event.hangoutLink };
-	}
 	if (contactPageIds.length > 0) {
 		properties["Contacts"] = {
 			relation: contactPageIds.map((id) => ({ id })),
 		};
 	}
-	if (internalAttendeeIds.length > 0) {
+	if (internalUserIds.length > 0) {
 		properties["Internal Attendees"] = {
-			people: internalAttendeeIds.map((id) => ({ id })),
+			people: internalUserIds.map((id) => ({ id })),
 		};
 	}
 
 	await notion.pages.update({ page_id: pageId, properties } as any);
 	console.log(
-		`Updated ${pageId}: event=${event.id}, contacts=${contactPageIds.length}, internal=${internalAttendeeIds.length}`,
+		`Updated ${pageId}: contacts=${contactPageIds.length}, internal=${internalUserIds.length}`,
 	);
 
 	// Notion DB automations don't reliably fire on API-driven property updates,
@@ -164,22 +144,6 @@ export async function handlePageCreated(
 		} catch (err) {
 			console.log(
 				`Icon sync webhook failed for ${pageId}: ${(err as Error)?.message ?? err}`,
-			);
-		}
-	}
-
-	if (event.iCalUID) {
-		try {
-			await upsertMeetingNoteIdRow(zapier, {
-				iCalUID: event.iCalUID,
-				pageId,
-				startDateTime: event.start.dateTime ?? event.start.date,
-				endDateTime: event.end.dateTime ?? event.end.date,
-				summary: event.summary,
-			});
-		} catch (err) {
-			console.log(
-				`Meeting Note IDs table write failed: ${(err as Error)?.message ?? err}`,
 			);
 		}
 	}

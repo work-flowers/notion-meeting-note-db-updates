@@ -8,7 +8,7 @@ export default worker;
 worker.webhook("onMeetingNoteCreated", {
 	title: "Meeting Note created",
 	description:
-		"Enrich a new Meeting Notes page with Google Calendar metadata + attendees.",
+		"Enrich a new Meeting Notes page with attendees resolved from its meeting_notes block.",
 	execute: async (events, { notion }) => {
 		const clientId = process.env.ZAPIER_CLIENT_ID;
 		const clientSecret = process.env.ZAPIER_CLIENT_SECRET;

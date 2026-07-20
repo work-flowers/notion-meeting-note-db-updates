@@ -1,29 +1,26 @@
 # notion-meeting-note-db-updates
 
-A [Notion Worker](https://developers.notion.com/workers) that enriches newly created pages in the **Meeting Notes** data source with metadata from Google Calendar and resolved attendees. Replaces a production Zap + sub-Zap that previously did this job (the originals are kept in `exported-zap-*.json` for reference).
+A [Notion Worker](https://developers.notion.com/workers) that enriches newly created pages in the **Meeting Notes** data source with the meeting date and resolved attendees, sourced entirely from the page's embedded `meeting_notes` block — no Google Calendar access required. Replaces a production Zap + sub-Zap that previously did this job (the originals are kept in `exported-zap-*.json` for reference).
 
 ## What it does
 
 When a page is added to the Meeting Notes data source, a Notion DB automation calls this Worker's webhook. The Worker then:
 
-1. Polls the page for a populated `meeting_notes` block and reads `calendar_event.start_time`.
-2. Strips the trailing ISO timestamp from the page title to recover the original meeting title.
-3. Calls the Google Calendar API via the Zapier SDK (reusing the existing Zapier OAuth connection — no separate Google client needed) to find the matching event in a 1-minute window around `start_time`.
-4. Resolves attendee emails (via [`@work-flowers/notion-worker-shared`](https://github.com/work-flowers/notion-worker-shared)):
-   - External addresses → Notion **Contacts** page IDs, matching on **Primary Email or Secondary Email**. Uses a Zapier-table blocklist, classifies unknown addresses with AI by Zapier (individual vs. service account), and creates new Contact pages for individuals (capped at 10 per run).
-   - Internal addresses → Notion workspace user IDs, via `notion.users.list`.
-5. Patches the page with `Date`, `Google Calendar Event ID`, `Description`, `Call Link`, `Contacts`, `Internal Attendees`.
-6. Find-or-creates a row in the Zapier `[Table] Meeting Note IDs` (`01JZCVG73MBWWB0357CEPS4903`) keyed on `iCalUID`, recording the Notion page ID alongside the event's start, end, and summary.
+1. Polls the page for a populated `meeting_notes` block and reads `calendar_event` (`start_time`, `end_time`, and `attendees` — an array of Notion user IDs covering both workspace members and external calendar guests).
+2. Resolves each attendee user ID via `notion.users.retrieve` to get their email:
+   - Internal (`@work.flowers`) people → used directly as **Internal Attendees** (their user ID *is* the people-property value).
+   - External emails → Notion **Contacts** page IDs (via [`@work-flowers/notion-worker-shared`](https://github.com/work-flowers/notion-worker-shared)), matching on **Primary Email or Secondary Email**. Uses a Zapier-table blocklist, classifies unknown addresses with AI by Zapier (individual vs. service account), and creates new Contact pages for individuals (capped at 10 per run).
+3. Patches the page with `Date`, `Contacts`, `Internal Attendees`.
+
+Earlier versions looked the event up in Google Calendar (via the Zapier SDK) to get attendee emails, and additionally wrote `Google Calendar Event ID`, `Description`, and `Call Link` plus an `iCalUID` → page-ID row in the Zapier `[Table] Meeting Note IDs`. Those fields are populated by other automations (or no longer needed), so the Google Calendar dependency was dropped.
 
 ## Layout
 
 ```
 src/
 ├── index.ts             # Worker + webhook registration
-├── handler.ts           # handlePageCreated orchestration
-├── meetingNotesBlock.ts # Poll for the populated meeting_notes child block
-├── calendar.ts          # Zapier-SDK-backed Google Calendar lookup
-└── meetingNoteIdsTable.ts # Find-or-create Zapier Table row mapping pageId ↔ iCalUID
+├── handler.ts           # handlePageCreated orchestration + attendee resolution
+└── meetingNotesBlock.ts # Poll for the populated meeting_notes child block
 ```
 
 Contact resolution, internal-user lookup, and raw data-source helpers live in [`@work-flowers/notion-worker-shared`](https://github.com/work-flowers/notion-worker-shared), shared with [notion-worker-email-db-updates](https://github.com/work-flowers/notion-worker-email-db-updates).
@@ -71,8 +68,14 @@ Wire it up in Notion: open the Meeting Notes data source → automations → tri
 
 ```bash
 ntn workers env pull        # write secrets to .env for local runs
+
+# Via the CLI — webhook capabilities take an ARRAY of event objects
+# (a bare '{"pageId": ...}' object exits silently without running the handler):
 ntn workers exec onMeetingNoteCreated --local \
-  -d '{"pageId": "<real-meeting-page-id>"}'
+  -d '[{"deliveryId":"test-1","body":{"pageId":"<real-meeting-page-id>"},"rawBody":"{}","headers":{},"method":"POST"}]'
+
+# Or drive the handler directly:
+npx tsx --env-file=.env ./test-handler.ts <real-meeting-page-id>
 ```
 
 ## Operating notes
